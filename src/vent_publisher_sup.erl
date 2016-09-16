@@ -59,9 +59,5 @@ publisher(HostOpts, Opts) ->
 
 -spec opts() -> vent_publisher:opts().
 opts() ->
-    #{exchange => required_opt(publish_exchange)}.
-
--spec required_opt(atom()) -> term().
-required_opt(Name) ->
-    {ok, Val} = application:get_env(vent, Name),
-    Val.
+    #{exchange => vent_helper:required_opt(publish_exchange),
+      chunk_size => vent_helper:opt(publish_chunk_size, 20)}.

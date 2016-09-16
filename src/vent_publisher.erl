@@ -15,10 +15,10 @@
 -include("vent_internal.hrl").
 -include_lib("amqp_client/include/amqp_client.hrl").
 
--define(CHUNK_SIZE, 20).
 -define(SERVER, ?MODULE).
 
 -type opts() :: #{id => term(),
+                  chunk_size => pos_integer(),
                   exchange => binary()}.
 -type topic() :: binary().
 -type message() :: #amqp_msg{}.
@@ -73,7 +73,8 @@ handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
--spec handle_cast({publish, topic(), [message()]}, state()) -> {noreply, state()}.
+-spec handle_cast({publish, topic(), [message()]},
+                   state()) -> {noreply, state()}.
 handle_cast({publish, Topic, Payload}, State) ->
     ok = publish(Topic, Payload, State),
     {noreply, State};
@@ -105,8 +106,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 -spec publish(topic(), [message()], #state{}) -> ok.
-publish(Topic, Messages, State) when length(Messages) > ?CHUNK_SIZE ->
-    {H, T} = lists:split(?CHUNK_SIZE, Messages),
+publish(Topic, Messages,
+        State = #state{opts = #{chunk_size := S}}) when length(Messages) > S ->
+    {H, T} = lists:split(S, Messages),
     publish_chunk(Topic, H, State),
     publish(Topic, T, State);
 publish(_Topic, [], _State) ->
