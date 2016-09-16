@@ -1,0 +1,21 @@
+{application, vent,
+ [{description, "An OTP application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { vent_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    lager,
+    jsone,
+    backoff,
+    statsderl,
+    amqp_client
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, []},
+  {links, []}
+ ]}.
