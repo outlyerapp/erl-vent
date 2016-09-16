@@ -1,7 +1,7 @@
 vent
 =====
 
-An application that simplifies writing RabbitMQ producers and An application.
+An application that simplifies writing RabbitMQ producers and consumers.
 
 Typically, a client workflow is as follows:
  
