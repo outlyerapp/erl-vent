@@ -1,0 +1,4 @@
+%% encoding: UTF-8
+{application,vent}.
+{modules,[vent_app,vent_debug_handler,vent_handler,vent_helper,vent_publisher,
+          vent_publisher_sup,vent_subscriber,vent_subscriber_sup,vent_sup]}.
