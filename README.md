@@ -1,6 +1,8 @@
 vent
 =====
 
+[![Hex pm](http://img.shields.io/hexpm/v/vent.svg?style=flat)](https://hex.pm/packages/vent)
+
 An application that simplifies writing RabbitMQ producers and consumers.
 
 Typically, a client workflow is as follows:
