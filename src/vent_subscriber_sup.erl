@@ -48,28 +48,26 @@ sup_flags() ->
 subscriber_spec(HostOpts) ->
     Subscribers = vent_helper:required_opt(subscribers),
     Workers = [begin
-                   {Opts, NWorkers} = opts(Subscriber),
-                   %% TODO: make a uniqueness constraint on ID, where
-                   %% |Subscribers| > 1
-                   SeqIds = lists:seq(1, NWorkers),
-                   [subscriber(SeqId, HostOpts, Opts) || SeqId <- SeqIds]
+                   Opts = opts(Subscriber),
+                   subscribers(HostOpts, Opts)
                end || Subscriber <- Subscribers],
     lists:flatten(Workers).
 
--spec subscriber(pos_integer(),
-                 host_opts(),
-                 vent_subscriber:opts()) -> supervisor:child_spec().
-subscriber(SeqId, HostOpts, Opts) ->
-    ID = {vent_subscriber, SeqId},
-    #{id => ID,
-      start => {vent_subscriber, start_link, [HostOpts, Opts#{id => ID}]}}.
+-spec subscribers(host_opts(),
+                  vent_subscriber:opts()) -> [supervisor:child_spec()].
+subscribers(HostOpts, Opts = #{handler   := Handler,
+                               n_workers := NWorkers}) ->
+    [begin
+         ID = {Handler, SeqId},
+         #{id => ID,
+           start => {vent_subscriber, start_link, [HostOpts, Opts#{id => ID}]}}
+     end || SeqId <- lists:seq(1, NWorkers)].
 
--spec opts(term()) -> {vent_subcriber:opts(), pos_integer()}.
+-spec opts(term()) -> vent_subcriber:opts().
 opts({vent_subscriber, Conf}) ->
     Defaults = #{handler => vent_debug_handler,
                  n_workers => 1,
                  prefetch_count => 2,
                  message_ttl => 300000},
     Props = maps:from_list(Conf),
-    NWorkers = proplists:get_value(n_workers, Conf, 1),
-    {maps:merge(Defaults, Props), NWorkers}.
+    maps:merge(Defaults, Props).

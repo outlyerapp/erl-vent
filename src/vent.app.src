@@ -1,21 +1,13 @@
 {application, vent,
- [{description, "An OTP application"},
+ [{description, "PubSub event bus over AMQP for Erlang"},
   {vsn, "0.1.0"},
   {registered, []},
   {mod, { vent_app, []}},
   {applications,
-   [kernel,
-    stdlib,
-    lager,
-    jsone,
-    backoff,
-    statsderl,
-    amqp_client
-   ]},
+   [kernel, stdlib, lager, folsom, metrics_exporter, jsone, backoff, amqp_client ]},
   {env,[]},
   {modules, []},
-
-  {maintainers, []},
-  {licenses, []},
-  {links, []}
+  {maintainers, ["Dataloop.io"]},
+  {licenses, ["MIT"]},
+  {links,[{"Github","https://github.com/dataloop/erl-vent"}]}
  ]}.

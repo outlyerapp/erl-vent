@@ -16,6 +16,7 @@
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -define(SERVER, ?MODULE).
+-define(METRIC_OUT, {vent_producer, out}).
 
 -type opts() :: #{id => term(),
                   chunk_size => pos_integer(),
@@ -51,6 +52,7 @@ publish(Topic, Payload) ->
 -spec init({host_opts(), opts()}) -> {ok, state()}.
 init({HostOpts, #{id := ID,
                   exchange := Exchange} = Opts}) ->
+    register_producer_metrics(),
     RParams = mk_params(maps:to_list(HostOpts)),
     {ok, Conn} = amqp_connection:start(RParams),
     {ok, Ch} = amqp_connection:open_channel(Conn),
@@ -126,6 +128,7 @@ publish_chunk(Topic, Messages, #state{channel = Ch, exchange = Exchange}) ->
                                routing_key = Topic},
     M = #'amqp_msg'{props = #'P_basic'{content_type = <<"application/json">>},
                     payload = Json},
+    counter_histogram:inc(?METRIC_OUT),
     amqp_channel:cast(Ch, Command, M).
 
 -spec mk_params([proplists:property()]) -> #amqp_params_network{}.
@@ -150,3 +153,7 @@ mk_params([{password, undefined} | Rest], Params) ->
     mk_params(Rest, Params);
 mk_params([{password, Pass} | Rest], Params) ->
     mk_params(Rest, Params#amqp_params_network{password = Pass}).
+
+register_producer_metrics() ->
+    counter_histogram:new(?METRIC_OUT),
+    exporter_server:register([?METRIC_OUT]).

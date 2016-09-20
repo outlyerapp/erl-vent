@@ -16,6 +16,7 @@
 
 -spec start(application:start_type(), term()) -> {ok, pid()}.
 start(_StartType, _StartArgs) ->
+    counter_histogram:start(),
     vent_sup:start_link().
 
 -spec stop(term()) -> ok.

@@ -22,6 +22,11 @@
 -define(MAX_BACKOFF, timer:minutes(2)).
 -define(QUEUE_WEIGHT, <<"10">>).
 
+-define(METRIC_IN, {vent_subscriber, in}).
+-define(METRIC_ACK, {vent_subscriber, ack}).
+-define(METRIC_ERROR, {vent_subscriber, error}).
+-define(METRIC_PROCESSING_TIME, {vent_subscriber, processing_time}).
+
 -type opts() :: #{id => term(),
                   handler => module(),
                   exchange => binary(),
@@ -37,7 +42,7 @@
 -type monitor_down() :: {'DOWN', reference(), process, pid(), any()}.
 -type message() :: #amqp_msg{}.
 -type timed_message() :: #{msg => message(),
-                           processing_start => vent_stats:monotonic_tstamp()}.
+                           processing_start => monotonic_tstamp()}.
 
 -record(state, {id :: term(),
                 host_opts :: host_opts(),
@@ -69,6 +74,7 @@ init({HostOpts, #{id := ID,
                   handler := HM,
                   error_exchange := EE,
                   error_routing_key := ERK} = Opts}) ->
+    register_subscriber_metrics(),
     %% TODO: gen_server:cast should work
     self() ! {subscribe, ?INITIAL_BACKOFF, ?MAX_BACKOFF},
     {ok, HandlerState} = vent_handler:init(HM),
@@ -140,8 +146,8 @@ handle_message(#'basic.consume_ok'{consumer_tag = Tag},
     {ok, State};
 handle_message({#'basic.deliver'{consumer_tag = Tag}, #amqp_msg{}} = Message,
                #state{consumer_tag = Tag} = State) ->
-    T0 = vent_stats:processing_start(nano_seconds),
-    statsderl:increment(<<"in">>, 1, vent_stats:stats_rate()),
+    T0 = get_monotonic_tstamp(nano_seconds),
+    counter_histogram:inc(?METRIC_IN),
     State1 = call_handler(#{msg => Message, processing_start => T0}, State),
     {ok, State1};
 handle_message(_, _State) ->
@@ -237,15 +243,16 @@ decode_payload(#{msg := {#'basic.deliver'{},
 -spec ack(channel(), timed_message()) -> ok.
 ack(Ch, #{msg := {#'basic.deliver'{delivery_tag = Tag}, _},
           processing_start := T0}) ->
-    statsderl:increment(<<"ack">>, 1, vent_stats:stats_rate()),
-    vent_stats:processing_time(T0),
+
+    counter_histogram:inc(?METRIC_ACK),
+    folsom_metrics:notify({?METRIC_PROCESSING_TIME, elapsed_time(T0)}),
     amqp_channel:cast(Ch, #'basic.ack'{delivery_tag = Tag}).
 
 -spec reject(channel(), boolean(), timed_message()) -> ok.
 reject(Ch, Requeue, #{msg := {#'basic.deliver'{delivery_tag = Tag}, _},
                       processing_start := T0}) ->
-    statsderl:increment(<<"error">>, 1, vent_stats:stats_slow_rate()),
-    vent_stats:processing_time(T0),
+    counter_histogram:inc(?METRIC_ERROR),
+    folsom_metrics:notify({?METRIC_PROCESSING_TIME, elapsed_time(T0)}),
     amqp_channel:cast(Ch, #'basic.reject'{delivery_tag = Tag,
                                           requeue = Requeue}).
 
@@ -395,3 +402,26 @@ params(Params) ->
 -spec start_rabbitmq(host_opts()) -> {ok, pid()}.
 start_rabbitmq(RabbitOpts) ->
     amqp_connection:start(params(maps:to_list(RabbitOpts))).
+
+register_subscriber_metrics() ->
+    counter_histogram:start(),
+    counter_histogram:new(?METRIC_IN),
+    counter_histogram:new(?METRIC_ACK),
+    counter_histogram:new(?METRIC_ERROR),
+    folsom_metrics:new_histogram(?METRIC_PROCESSING_TIME, slide, 60),
+
+    exporter_server:register([?METRIC_IN, ?METRIC_ACK, ?METRIC_ERROR,
+                              ?METRIC_PROCESSING_TIME]).
+
+-spec get_monotonic_tstamp(timeunit()) -> monotonic_tstamp().
+get_monotonic_tstamp(nano_seconds) ->
+    {erlang:monotonic_time(nano_seconds), nano_seconds}.
+
+-spec elapsed_time(monotonic_tstamp()) -> float().
+elapsed_time({T0, nano_seconds}) ->
+    {T1, nano_seconds} = get_monotonic_tstamp(nano_seconds),
+    time_difference(T0, T1, nano_seconds).
+
+time_difference(T0, T1, nano_seconds) ->
+    NanosToMillisDiv = 1000000,
+    (T1 - T0) / NanosToMillisDiv.
