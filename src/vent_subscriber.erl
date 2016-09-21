@@ -404,14 +404,13 @@ start_rabbitmq(RabbitOpts) ->
     amqp_connection:start(params(maps:to_list(RabbitOpts))).
 
 register_subscriber_metrics() ->
-    counter_histogram:start(),
     counter_histogram:new(?METRIC_IN),
     counter_histogram:new(?METRIC_ACK),
     counter_histogram:new(?METRIC_ERROR),
     folsom_metrics:new_histogram(?METRIC_PROCESSING_TIME, slide, 60),
 
-    exporter_server:register([?METRIC_IN, ?METRIC_ACK, ?METRIC_ERROR,
-                              ?METRIC_PROCESSING_TIME]).
+    metrics_reader:register([?METRIC_IN, ?METRIC_ACK, ?METRIC_ERROR,
+                             ?METRIC_PROCESSING_TIME]).
 
 -spec get_monotonic_tstamp(timeunit()) -> monotonic_tstamp().
 get_monotonic_tstamp(nano_seconds) ->

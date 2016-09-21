@@ -3,7 +3,7 @@
               {vsn,"0.1.1"},
               {registered,[]},
               {mod,{vent_app,[]}},
-              {applications,[kernel,stdlib,lager,folsom,metrics_exporter,
+              {applications,[kernel,stdlib,lager,folsom,metrics_reader,
                              jsone,backoff,amqp_client]},
               {env,[]},
               {modules,[]},

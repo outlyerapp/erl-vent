@@ -156,4 +156,4 @@ mk_params([{password, Pass} | Rest], Params) ->
 
 register_producer_metrics() ->
     counter_histogram:new(?METRIC_OUT),
-    exporter_server:register([?METRIC_OUT]).
+    metrics_reader:register([?METRIC_OUT]).
