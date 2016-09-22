@@ -39,7 +39,7 @@
 
 -spec start_link(host_opts(), opts()) -> gen_server_startlink_ret().
 start_link(HostOpts, Opts) ->
-    gen_server:start_link(?MODULE, {HostOpts, Opts}, []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, {HostOpts, Opts}, []).
 
 -spec publish(exchange(), topic(), binary()) -> ok.
 publish(Exchange, Topic, Payload) ->
@@ -72,7 +72,7 @@ handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
--spec handle_cast(term(), state()) -> {noreply, state()}.
+-spec handle_cast(any(), state()) -> {noreply, state()}.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
