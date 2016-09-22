@@ -43,7 +43,7 @@ start_link(HostOpts, Opts) ->
 
 -spec publish(exchange(), topic(), binary()) -> ok.
 publish(Exchange, Topic, Payload) ->
-    gen_server:cast(?SERVER, {publish, Exchange, Topic, Payload}).
+    gen_server:call(?SERVER, {publish, Exchange, Topic, Payload}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -64,20 +64,15 @@ init({HostOpts, #{id := ID} = Opts}) ->
                 channel = Ch}}.
 
 -spec handle_call(any(), any(), state()) -> {reply, ok, state()}.
+handle_call({publish, Exchange, Topic, Payload}, _From, State) ->
+    Reply = publish(Exchange, Topic, Payload, State),
+    {reply, Reply, State};
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
--spec handle_cast({publish,
-                   exchange(),
-                   topic(),
-                   [message()]},
-                   state()) -> {noreply, state()}.
-
-handle_cast({publish, Exchange, Topic, Payload}, State) ->
-    ok = publish(Exchange, Topic, Payload, State),
-    {noreply, State};
-
+-spec handle_cast(term(), state()) -> {noreply, state()}.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
