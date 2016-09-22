@@ -59,5 +59,4 @@ publisher(HostOpts, Opts) ->
 
 -spec opts() -> vent_publisher:opts().
 opts() ->
-    #{exchange => vent_helper:required_opt(publish_exchange),
-      chunk_size => vent_helper:opt(publish_chunk_size, 20)}.
+    #{chunk_size => vent_helper:opt(publish_chunk_size, 20)}.

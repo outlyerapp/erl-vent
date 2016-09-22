@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2, publish/2]).
+-export([start_link/2, publish/3]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -19,8 +19,9 @@
 -define(METRIC_OUT, {vent_producer, out}).
 
 -type opts() :: #{id => term(),
-                  chunk_size => pos_integer(),
-                  exchange => binary()}.
+                  chunk_size => pos_integer()}.
+
+-type exchange() :: binary().
 -type topic() :: binary().
 -type message() :: #amqp_msg{}.
 
@@ -28,8 +29,7 @@
                 host_opts :: host_opts(),
                 opts :: opts(),
                 conn :: connection(),
-                channel :: channel(),
-                exchange :: binary()}).
+                channel :: channel()}).
 
 -type state() :: #state{}.
 
@@ -41,44 +41,41 @@
 start_link(HostOpts, Opts) ->
     gen_server:start_link(?MODULE, {HostOpts, Opts}, []).
 
--spec publish(topic(), binary()) -> ok.
-publish(Topic, Payload) ->
-    gen_server:cast(?SERVER, {publish, Topic, Payload}).
+-spec publish(exchange(), topic(), binary()) -> ok.
+publish(Exchange, Topic, Payload) ->
+    gen_server:cast(?SERVER, {publish, Exchange, Topic, Payload}).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 -spec init({host_opts(), opts()}) -> {ok, state()}.
-init({HostOpts, #{id := ID,
-                  exchange := Exchange} = Opts}) ->
+init({HostOpts, #{id := ID} = Opts}) ->
     register_producer_metrics(),
     RParams = mk_params(maps:to_list(HostOpts)),
     {ok, Conn} = amqp_connection:start(RParams),
     {ok, Ch} = amqp_connection:open_channel(Conn),
     link(Conn),
     link(Ch),
-    %% TODO: Make exchange properties configurable
-    ExCommand = #'exchange.declare'{exchange = Exchange,
-                                    type = <<"topic">>,
-                                    durable = true},
-    #'exchange.declare_ok'{} = amqp_channel:call(Ch, ExCommand),
     {ok, #state{id = ID,
                 host_opts = HostOpts,
                 opts = Opts,
                 conn = Conn,
-                channel = Ch,
-                exchange = Exchange}}.
+                channel = Ch}}.
 
 -spec handle_call(any(), any(), state()) -> {reply, ok, state()}.
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
--spec handle_cast({publish, topic(), [message()]},
+-spec handle_cast({publish,
+                   exchange(),
+                   topic(),
+                   [message()]},
                    state()) -> {noreply, state()}.
-handle_cast({publish, Topic, Payload}, State) ->
-    ok = publish(Topic, Payload, State),
+
+handle_cast({publish, Exchange, Topic, Payload}, State) ->
+    ok = publish(Exchange, Topic, Payload, State),
     {noreply, State};
 
 handle_cast(_Msg, State) ->
@@ -107,19 +104,19 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec publish(topic(), [message()], #state{}) -> ok.
-publish(Topic, Messages,
+-spec publish(exchange(), topic(), [message()], #state{}) -> ok.
+publish(Exchange, Topic, Messages,
         State = #state{opts = #{chunk_size := S}}) when length(Messages) > S ->
     {H, T} = lists:split(S, Messages),
-    publish_chunk(Topic, H, State),
-    publish(Topic, T, State);
-publish(_Topic, [], _State) ->
+    publish_chunk(Exchange, Topic, H, State),
+    publish(Exchange, Topic, T, State);
+publish(_Exchange, _Topic, [], _State) ->
     ok;
-publish(Topic, Messages, State) ->
-    publish_chunk(Topic, Messages, State).
+publish(Exchange, Topic, Messages, State) ->
+    publish_chunk(Exchange, Topic, Messages, State).
 
--spec publish_chunk(topic(), [message()], #state{}) -> ok.
-publish_chunk(Topic, Messages, #state{channel = Ch, exchange = Exchange}) ->
+-spec publish_chunk(exchange(), topic(), [message()], #state{}) -> ok.
+publish_chunk(Exchange, Topic, Messages, #state{channel = Ch}) ->
     %% TODO: remove assumption on JSON serialization
     Json = jsone:encode(Messages),
     lager:info("Publishing to ~p samples to ~p exchange",
@@ -128,6 +125,7 @@ publish_chunk(Topic, Messages, #state{channel = Ch, exchange = Exchange}) ->
                                routing_key = Topic},
     M = #'amqp_msg'{props = #'P_basic'{content_type = <<"application/json">>},
                     payload = Json},
+    declare_exchange(Ch, Exchange),
     counter_histogram:inc(?METRIC_OUT),
     amqp_channel:cast(Ch, Command, M).
 
@@ -153,6 +151,15 @@ mk_params([{password, undefined} | Rest], Params) ->
     mk_params(Rest, Params);
 mk_params([{password, Pass} | Rest], Params) ->
     mk_params(Rest, Params#amqp_params_network{password = Pass}).
+
+%% TODO: Make exchange properties configurable
+-spec declare_exchange(channel(), exchange()) -> ok.
+declare_exchange(Channel, Exchange) ->
+    ExCommand = #'exchange.declare'{exchange = Exchange,
+                                    type = <<"topic">>,
+                                    durable = true},
+    #'exchange.declare_ok'{} = amqp_channel:call(Channel, ExCommand),
+    ok.
 
 register_producer_metrics() ->
     counter_histogram:new(?METRIC_OUT),

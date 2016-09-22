@@ -6,7 +6,7 @@ vent
 An application that simplifies writing RabbitMQ producers and consumers.
 
 Typically, a client workflow is as follows:
- 
+
 - Establish a connection to a broker
 - Create a new channel within the open connection
 - Execute AMQP commands with a channel such as sending and receiving messages, creating exchanges and queue or defining routing rules between exchanges and queues
@@ -27,13 +27,14 @@ RabbitMQ configuration:
 
 ## Publishers
 
-Only one topic exchange message flow is currently supported.  Also, it is not
-possible to configure multiple publishers at present.  The serialization format
-is assumed to be JSON.
+The serialization format is assumed to be JSON.
+
+To publish a message:
+
+    vent_publisher:publish(Exchange, Topic, Payload).
 
 Publisher configuration:
 
-    {publish_exchange, <<"publish_exchange">>}          # required
     {publish_chunk_size, 20}                            # defaults to 20
 
 ## Subscribers
