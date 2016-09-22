@@ -8,6 +8,7 @@
 get_host_opts() ->
     Opts = [{host, opt(host, "localhost")},
             {port, opt(port, 5672)},
+            {virtual_host, opt(virtual_host, <<"/">>)},
             {username, opt(username, undefined)},
             {password, opt(password, undefined)}],
     maps:from_list([{K, V} || {K, V} <- Opts, V =/= undefined]).
