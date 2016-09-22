@@ -23,7 +23,7 @@
 
 -type exchange() :: binary().
 -type topic() :: binary().
--type message() :: #amqp_msg{}.
+-type sample() :: #{}.
 
 -record(state, {id :: term(),
                 host_opts :: host_opts(),
@@ -41,7 +41,7 @@
 start_link(HostOpts, Opts) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, {HostOpts, Opts}, []).
 
--spec publish(exchange(), topic(), binary()) -> ok.
+-spec publish(exchange(), topic(), [sample()]) -> ok.
 publish(Exchange, Topic, Payload) ->
     gen_server:call(?SERVER, {publish, Exchange, Topic, Payload}).
 
@@ -99,7 +99,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec publish(exchange(), topic(), [message()], #state{}) -> ok.
+-spec publish(exchange(), topic(), [sample()], #state{}) -> ok.
 publish(Exchange, Topic, Messages,
         State = #state{opts = #{chunk_size := S}}) when length(Messages) > S ->
     {H, T} = lists:split(S, Messages),
@@ -110,7 +110,7 @@ publish(_Exchange, _Topic, [], _State) ->
 publish(Exchange, Topic, Messages, State) ->
     publish_chunk(Exchange, Topic, Messages, State).
 
--spec publish_chunk(exchange(), topic(), [message()], #state{}) -> ok.
+-spec publish_chunk(exchange(), topic(), [sample()], #state{}) -> ok.
 publish_chunk(Exchange, Topic, Messages, #state{channel = Ch}) ->
     %% TODO: remove assumption on JSON serialization
     Json = jsone:encode(Messages),
