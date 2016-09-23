@@ -114,7 +114,7 @@ publish(Exchange, Topic, Messages, State) ->
 publish_chunk(Exchange, Topic, Messages, #state{channel = Ch}) ->
     %% TODO: remove assumption on JSON serialization
     Json = jsone:encode(Messages),
-    lager:info("Publishing to ~p samples to ~p exchange",
+    lager:info("Publishing ~p samples to ~p exchange",
                 [length(Messages), Exchange]),
     Command = #'basic.publish'{exchange = Exchange,
                                routing_key = Topic},
