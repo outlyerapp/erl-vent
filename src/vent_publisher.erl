@@ -16,8 +16,8 @@
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -define(SERVER, ?MODULE).
--define(METRIC_OUT, {vent_producer, out}).
--define(METRIC_OUT_HIST, {vent_subscriber, out_per_second}).
+-define(METRIC_OUT, {vent_publisher, out}).
+-define(METRIC_OUT_HIST, {vent_publisher, out_per_second}).
 
 -type opts() :: #{id => term(),
                   chunk_size => pos_integer()}.
