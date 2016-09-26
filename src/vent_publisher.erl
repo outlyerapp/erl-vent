@@ -17,6 +17,7 @@
 
 -define(SERVER, ?MODULE).
 -define(METRIC_OUT, {vent_producer, out}).
+-define(METRIC_OUT_HIST, {vent_subscriber, out_per_second}).
 
 -type opts() :: #{id => term(),
                   chunk_size => pos_integer()}.
@@ -121,7 +122,7 @@ publish_chunk(Exchange, Topic, Messages, #state{channel = Ch}) ->
     M = #'amqp_msg'{props = #'P_basic'{content_type = <<"application/json">>},
                     payload = Json},
     declare_exchange(Ch, Exchange),
-    counter_histogram:inc(?METRIC_OUT),
+    folsom_metrics:notify({?METRIC_OUT, {inc, 1}}),
     amqp_channel:cast(Ch, Command, M).
 
 -spec mk_params([proplists:property()]) -> #amqp_params_network{}.
@@ -157,5 +158,5 @@ declare_exchange(Channel, Exchange) ->
     ok.
 
 register_producer_metrics() ->
-    counter_histogram:new(?METRIC_OUT),
-    metrics_reader:register([?METRIC_OUT]).
+    folsom_metrics:new_counter(?METRIC_OUT),
+    metrics_observer:observe(?METRIC_OUT, ?METRIC_OUT_HIST).

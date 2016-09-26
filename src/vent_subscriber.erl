@@ -23,8 +23,11 @@
 -define(QUEUE_WEIGHT, <<"10">>).
 
 -define(METRIC_IN, {vent_subscriber, in}).
+-define(METRIC_IN_HIST, {vent_subscriber, in_per_second}).
 -define(METRIC_ACK, {vent_subscriber, ack}).
+-define(METRIC_ACK_HIST, {vent_subscriber, ack_per_second}).
 -define(METRIC_ERROR, {vent_subscriber, error}).
+-define(METRIC_ERROR_HIST, {vent_subscriber, error_per_second}).
 -define(METRIC_PROCESSING_TIME, {vent_subscriber, processing_time}).
 
 -type opts() :: #{id => term(),
@@ -147,7 +150,7 @@ handle_message(#'basic.consume_ok'{consumer_tag = Tag},
 handle_message({#'basic.deliver'{consumer_tag = Tag}, #amqp_msg{}} = Message,
                #state{consumer_tag = Tag} = State) ->
     T0 = get_monotonic_tstamp(nano_seconds),
-    counter_histogram:inc(?METRIC_IN),
+    folsom_metrics:notify({?METRIC_IN, {inc, 1}}),
     State1 = call_handler(#{msg => Message, processing_start => T0}, State),
     {ok, State1};
 handle_message(_, _State) ->
@@ -244,14 +247,14 @@ decode_payload(#{msg := {#'basic.deliver'{},
 ack(Ch, #{msg := {#'basic.deliver'{delivery_tag = Tag}, _},
           processing_start := T0}) ->
 
-    counter_histogram:inc(?METRIC_ACK),
+    folsom_metrics:notify({?METRIC_ACK, {inc, 1}}),
     folsom_metrics:notify({?METRIC_PROCESSING_TIME, elapsed_time(T0)}),
     amqp_channel:cast(Ch, #'basic.ack'{delivery_tag = Tag}).
 
 -spec reject(channel(), boolean(), timed_message()) -> ok.
 reject(Ch, Requeue, #{msg := {#'basic.deliver'{delivery_tag = Tag}, _},
                       processing_start := T0}) ->
-    counter_histogram:inc(?METRIC_ERROR),
+    folsom_metrics:notify({?METRIC_ERROR, {inc, 1}}),
     folsom_metrics:notify({?METRIC_PROCESSING_TIME, elapsed_time(T0)}),
     amqp_channel:cast(Ch, #'basic.reject'{delivery_tag = Tag,
                                           requeue = Requeue}).
@@ -404,13 +407,15 @@ start_rabbitmq(RabbitOpts) ->
     amqp_connection:start(params(maps:to_list(RabbitOpts))).
 
 register_subscriber_metrics() ->
-    counter_histogram:new(?METRIC_IN),
-    counter_histogram:new(?METRIC_ACK),
-    counter_histogram:new(?METRIC_ERROR),
+    folsom_metrics:new_counter(?METRIC_IN),
+    folsom_metrics:new_counter(?METRIC_ACK),
+    folsom_metrics:new_counter(?METRIC_ERROR),
     folsom_metrics:new_histogram(?METRIC_PROCESSING_TIME, slide, 60),
 
-    metrics_reader:register([?METRIC_IN, ?METRIC_ACK, ?METRIC_ERROR,
-                             ?METRIC_PROCESSING_TIME]).
+    metrics_observer:observe(?METRIC_IN, ?METRIC_IN_HIST),
+    metrics_observer:observe(?METRIC_ACK, ?METRIC_ACK_HIST),
+    metrics_observer:observe(?METRIC_ERROR, ?METRIC_ERROR_HIST),
+    metrics_reader:register([?METRIC_PROCESSING_TIME]).
 
 -spec get_monotonic_tstamp(timeunit()) -> monotonic_tstamp().
 get_monotonic_tstamp(nano_seconds) ->
