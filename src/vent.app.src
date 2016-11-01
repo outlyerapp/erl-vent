@@ -1,6 +1,6 @@
 {application,vent,
              [{description,"PubSub event bus over AMQP for Erlang"},
-              {vsn,"0.1.10"},
+              {vsn,"0.2.0"},
               {registered,[]},
               {mod,{vent_app,[]}},
               {applications,[kernel,stdlib,lager,folsom,jsone,backoff,
