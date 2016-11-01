@@ -17,7 +17,6 @@
 
 -define(SERVER, ?MODULE).
 -define(METRIC_OUT, {vent_publisher, out}).
--define(METRIC_OUT_HIST, {vent_publisher, out_per_second}).
 
 -type opts() :: #{id => term(),
                   chunk_size => pos_integer()}.
@@ -52,7 +51,7 @@ publish(Exchange, Topic, Payload) ->
 
 -spec init({host_opts(), opts()}) -> {ok, state()}.
 init({HostOpts, #{id := ID} = Opts}) ->
-    register_producer_metrics(),
+    folsom_metrics:new_counter(?METRIC_OUT),
     RParams = mk_params(maps:to_list(HostOpts)),
     {ok, Conn} = amqp_connection:start(RParams),
     {ok, Ch} = amqp_connection:open_channel(Conn),
@@ -156,7 +155,3 @@ declare_exchange(Channel, Exchange) ->
                                     durable = true},
     #'exchange.declare_ok'{} = amqp_channel:call(Channel, ExCommand),
     ok.
-
-register_producer_metrics() ->
-    folsom_metrics:new_counter(?METRIC_OUT),
-    metrics_observer:observe(?METRIC_OUT, ?METRIC_OUT_HIST).

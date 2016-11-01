@@ -23,11 +23,8 @@
 -define(QUEUE_WEIGHT, <<"10">>).
 
 -define(METRIC_IN, {vent_subscriber, in}).
--define(METRIC_IN_HIST, {vent_subscriber, in_per_second}).
 -define(METRIC_ACK, {vent_subscriber, ack}).
--define(METRIC_ACK_HIST, {vent_subscriber, ack_per_second}).
 -define(METRIC_ERROR, {vent_subscriber, error}).
--define(METRIC_ERROR_HIST, {vent_subscriber, error_per_second}).
 -define(METRIC_PROCESSING_TIME, {vent_subscriber, processing_time}).
 
 -type opts() :: #{id => term(),
@@ -410,12 +407,7 @@ register_subscriber_metrics() ->
     folsom_metrics:new_counter(?METRIC_IN),
     folsom_metrics:new_counter(?METRIC_ACK),
     folsom_metrics:new_counter(?METRIC_ERROR),
-    folsom_metrics:new_histogram(?METRIC_PROCESSING_TIME, slide, 60),
-
-    metrics_observer:observe(?METRIC_IN, ?METRIC_IN_HIST),
-    metrics_observer:observe(?METRIC_ACK, ?METRIC_ACK_HIST),
-    metrics_observer:observe(?METRIC_ERROR, ?METRIC_ERROR_HIST),
-    metrics_reader:register([?METRIC_PROCESSING_TIME]).
+    folsom_metrics:new_histogram(?METRIC_PROCESSING_TIME, slide, 60).
 
 -spec get_monotonic_tstamp(timeunit()) -> monotonic_tstamp().
 get_monotonic_tstamp(nano_seconds) ->
