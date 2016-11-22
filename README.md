@@ -47,6 +47,7 @@ consists of the following callbacks:
     callback handle(term(), state()) ->
        {ok, state()} |
        {requeue, term(), state()} |
+       {requeue, number(), term(), state()} |
        {drop, term(), state()}.
     callback terminate(state()) ->
        ok.

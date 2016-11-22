@@ -111,6 +111,11 @@ handle_info({subscribe, Backoff, MaxBackoff}, #state{host_opts = HostOpts,
     ok = configure(HostOpts, Opts),
     {ok, State1} = subscribe(State),
     {noreply, State1};
+handle_info({requeue, Message, Reason},
+             #state{channel = Ch} = State) ->
+    lager:error("Handler asked to requeue message: ~p~n", [Reason]),
+    reject(Ch, true, Message),
+    {noreply, State};
 handle_info({'DOWN', _MRef, process, _Pid, _Info} = Down, State) ->
     lager:error("broker down: ~p", [Down]),
     {stop, {broker_down, Down}, State};
@@ -211,6 +216,9 @@ call_handler(Message,
             reject(Ch, true, Message),
             lager:error("Handler asked to requeue message: ~p~n", [Reason]),
             State#state{handler_state = HState1};
+        {requeue, Timeout, Reason, HState1} when Timeout > 0 ->
+            erlang:send_after(Timeout, self(), {requeue, Message, Reason}),
+            State#state{handler_state = HState1};
         {drop, Reason, HState1} ->
             State1 = State#state{handler_state = HState1},
             error(Ch, Message, Reason, State),
@@ -285,11 +293,11 @@ populate_record(Record, Fields, Properties) ->
                || {Name, Def} <- Defaults ],
     list_to_tuple([Type | Values]).
 
-declare_work_exchanges(Ch, #{n_workers := 1} = Opts) ->
-    #{exchange := Exchange} = Opts,
+declare_work_exchanges(Ch, #{n_workers := 1, exchange := Exchange}) ->
     declare_exchange(Ch, Exchange, <<"topic">>);
-declare_work_exchanges(Ch, #{n_workers := N} = Opts) when N > 1 ->
-    #{exchange := Exchange, routing_key := RKey} = Opts,
+declare_work_exchanges(Ch, #{n_workers := N,
+                             exchange := Exchange,
+                             routing_key := RKey}) when N > 1 ->
     declare_exchange(Ch, Exchange, <<"topic">>),
     HashingExchange = hashing_exchange_name(Exchange),
     declare_exchange(Ch, HashingExchange, <<"x-consistent-hash">>),

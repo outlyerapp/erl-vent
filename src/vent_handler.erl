@@ -31,6 +31,9 @@ init(Mod) ->
 %%   situation could change in feature, so message should be re tried
 %%   later. This usually happens if other systems are down and can't
 %%   be reached, but may become available in feature.
+%% * {requeue, TTL, Reason, State} -> If the message is not acknowledged
+%%   within a finite period of time, it is automatically rejected and placed
+%%   back onto the queue.
 %% * {drop, Reason, State} - Handler should respond with drop only if
 %%   it can't do anything with message and it wont change in feature.
 %%   In this case message is moved to error queue and never re-tried.
@@ -41,6 +44,7 @@ init(Mod) ->
 -spec handle(module(), term(), state()) ->
                     {ok, state()} |
                     {requeue, term(), state()} |
+                    {requeue, number(), term(), state()} |
                     {drop, term(), state()}.
 handle(Mod, Msg, State) ->
     Mod:handle(Msg, State).
