@@ -64,7 +64,7 @@ Every subscription should be configured together with its handler:
     {error_exchange, <<"errors">>},                     # required
     {error_routing_key, <<"error_routing_key">>},       # required
     {queue, <<"vent:queue">>},                          # required
-    {message_ttl, 300000},                              # defaults to 300000
+    {message_ttl, 300000},                              # defaults to infinite
     {handler, vent_debug_handler}]                      # defaults to vent_debug_handler
 
 Note that more than one subscriber may be registered.

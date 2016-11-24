@@ -359,7 +359,9 @@ queue_name(Prefix, SeqNo, _NWorkers) ->
 queue_arguments(#{dead_letter_exchange := DLExchange,
                   message_ttl := Ttl}) ->
     [{<<"x-message-ttl">>, long, Ttl},
-     {<<"x-dead-letter-exchange">>, longstr, DLExchange}].
+     {<<"x-dead-letter-exchange">>, longstr, DLExchange}];
+queue_arguments(#{dead_letter_exchange := DLExchange}) ->
+    [{<<"x-dead-letter-exchange">>, longstr, DLExchange}].
 
 bind_queues(Ch, #{n_workers := N} = Opts) ->
     #{exchange := Prefix,

@@ -67,7 +67,6 @@ subscribers(HostOpts, Opts = #{handler   := Handler,
 opts({vent_subscriber, Conf}) ->
     Defaults = #{handler => vent_debug_handler,
                  n_workers => 1,
-                 prefetch_count => 2,
-                 message_ttl => 300000},
+                 prefetch_count => 2},
     Props = maps:from_list(Conf),
     maps:merge(Defaults, Props).
