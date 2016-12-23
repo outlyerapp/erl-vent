@@ -121,7 +121,7 @@ handle_info({subscribe, Backoff, MaxBackoff}, #state{host_opts = HostOpts,
     {noreply, State1};
 
 handle_info({process, Message, Response}, State = #state{worker = Pid}) ->
-    lager:info("subscriber handler{~p} response: ~p", [Pid, Response]),
+    lager:debug("subscriber handler{~p} response: ~p", [Pid, Response]),
     handler_result(Message, Response, State),
     {noreply, State};
 
