@@ -1,93 +1,65 @@
 -module(vent_handler_worker).
--behaviour(gen_server).
 
 %% API
--export([start_link/1, process_msg/2]).
-
-%% gen_server callbacks
--export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
-
--ignore_xref([start_link/2]).
+-export([simple_processor/1, process/2, terminate/2]).
 
 -include("vent_internal.hrl").
 -include_lib("amqp_client/include/amqp_client.hrl").
-
--define(SERVER, ?MODULE).
 
 -type handler_response() :: ok |
                             {requeue, term()} |
                             {requeue, number(), term()} |
                             {drop, term()}.
-
 -type message() :: #amqp_msg{}.
 -type timed_message() :: #{msg => message(),
                            processing_start => monotonic_tstamp()}.
 
--record(state, { handler :: module(),
-                 handler_state :: term()}).
+-export_type([handler_response/0]).
+
+-record(state, { handler_state :: term(),
+                 handler :: module() }).
 
 -type state() :: #state{}.
 
-%%
-%% API
-%%
+-spec simple_processor(Handler :: module()) -> ok.
+simple_processor(Handler) ->
+    {ok, HState} = init(Handler),
+    loop(#state{handler = Handler, handler_state = HState}).
 
--spec start_link(term()) -> gen_server_startlink_ret().
-start_link(Args) ->
-    gen_server:start(?MODULE, Args, []).
+-spec process(pid(), Msg :: timed_message()) -> ok.
+process(Pid, Msg) ->
+    Pid ! {self(), {process, Msg}}.
 
--spec process_msg(pid(), Msg :: term()) -> {ok, handler_response()}.
-process_msg(Pid, Msg) ->
-    gen_server:call(Pid, {process, Msg}).
+-spec terminate(pid(), Reason :: term()) -> ok.
+terminate(Pid, Reason) ->
+    Pid ! {terminate, Reason}.
 
-%%
-%% gen_server callbacks
-%%
--spec init(HandlerMod :: module()) -> {ok, state()}.
-init(HandlerMod) ->
-    {ok, HandlerState} = vent_handler:init(HandlerMod),
-    {ok, #state{ handler = HandlerMod,
-                 handler_state = HandlerState }}.
+%% TODO configure a timeout so processing is not indefinite
+loop(State) ->
+    receive
+        {From, {process, Message}} ->
+            {Response, State1} = handle(Message, State),
+            From ! {process, Message, Response},
 
-
--spec handle_call(any(), any(), state()) -> {reply, ok, state()}.
-handle_call({process, Msg}, _From, State) ->
-    case handle(Msg, State) of
-        {Response = {error, _Reason}, State1} ->
-            {stop, error, Response, State1};
-        {Response, State1} ->
-            {reply, Response, State1}
+            case Response of
+                {error, Reason} ->
+                    exit(self(), Reason);
+                _ ->
+                    loop(State1)
+            end;
+        {terminate, Reason} ->
+            terminate_handler(State, Reason);
+        {'EXIT', _Parent, Reason} ->
+            terminate_handler(State, Reason)
     end.
-
--spec handle_cast(any(), state()) -> {noreply, state()}.
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
--spec handle_info(term(), state()) -> {noreply, state()} |
-                                      {stop, any(), state()}.
-handle_info(_Info, State) ->
-    {noreply, State}.
-
--spec terminate(any(), any()) -> ok.
-terminate(Reason, #state{handler = Handler, handler_state = HandlerState}) ->
-    lager:info("Terminating vent handler: ~p due to: ~p", [Handler, Reason]),
-    Handler:terminate(HandlerState),
-    ok;
-terminate(_Reason, _State) ->
-    ok.
-
--spec code_change(any(), state(), any()) -> {ok, state()}.
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 %%
 %% Internal functions
 %%
+
+-spec init(Handler :: module()) -> state().
+init(Handler) when is_atom(Handler) ->
+    vent_handler:init(Handler).
 
 -spec handle(timed_message(), state()) -> {handler_response(), state()}.
 handle(Message, #state{handler = Handler, handler_state = HState} = State) ->
@@ -132,3 +104,8 @@ decode_payload(#{msg := {#'basic.deliver'{},
                         [{ErrorType, Reason, Stack}]),
             throw({ErrorType, Reason})
     end.
+
+-spec terminate_handler(state(), Reason :: term()) -> ok.
+terminate_handler(#state{handler = Handler, handler_state = HState}, Reason) ->
+    lager:info("Handler worker terminating due to reason: ~p", [Reason]),
+    vent_handler:handle(Handler, HState).

@@ -19,7 +19,13 @@
 %%--------------------------------------------------------------------
 -spec init(module()) -> {ok, state()}.
 init(Mod) ->
-    Mod:init().
+    _ = code:ensure_loaded(Mod),
+    case erlang:function_exported(Mod, init, 0) of
+        false ->
+            {error, badarg};
+        true ->
+            Mod:init()
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc Handle message
@@ -47,7 +53,12 @@ init(Mod) ->
                     {requeue, number(), term(), state()} |
                     {drop, term(), state()}.
 handle(Mod, Msg, State) ->
-    Mod:handle(Msg, State).
+    case erlang:function_exported(Mod, handle, 2) of
+        false ->
+            {error, badarg};
+        true ->
+            Mod:handle(Msg, State)
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc Stops a pusher.
@@ -55,4 +66,9 @@ handle(Mod, Msg, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(module(), state()) -> ok.
 terminate(Mod, State) ->
-    Mod:terminate(State).
+    case erlang:function_exported(Mod, terminate, 1) of
+        false ->
+            {error, badarg};
+        true ->
+            Mod:terminate(State)
+    end.

@@ -75,7 +75,6 @@ init({HostOpts, #{id := ID,
                   handler := HM,
                   error_exchange := EE,
                   error_routing_key := ERK} = Opts}) ->
-    process_flag(trap_exit, true),
     register_subscriber_metrics(),
     State = start_worker(#state{handler = HM}),
     %% TODO: gen_server:cast should work
@@ -89,8 +88,10 @@ init({HostOpts, #{id := ID,
 
 -spec start_worker(state()) -> state().
 start_worker(State = #state{ handler = HM }) ->
-    {ok, Pid} = vent_handler_worker:start_link(HM),
-    link(Pid),
+    process_flag(trap_exit, true),
+    Fun = fun vent_handler_worker:simple_processor/1,
+    Pid = spawn_link(fun() -> Fun(HM) end),
+    lager:info("subscriber{~p} started worker module ~p{~p}", [self(), HM, Pid]),
     State#state{ worker = Pid }.
 
 -spec handle_call(any(), any(), state()) -> {reply, ok, state()}.
@@ -118,13 +119,20 @@ handle_info({subscribe, Backoff, MaxBackoff}, #state{host_opts = HostOpts,
     ok = configure(HostOpts, Opts),
     {ok, State1} = subscribe(State),
     {noreply, State1};
+
+handle_info({process, Message, Response}, State = #state{worker = Pid}) ->
+    lager:info("subscriber handler{~p} response: ~p", [Pid, Response]),
+    handler_result(Message, Response, State),
+    {noreply, State};
+
 handle_info({requeue, Message, Reason},
              #state{channel = Ch} = State) ->
     lager:error("Handler asked to requeue message: ~p~n", [Reason]),
     reject(Ch, true, Message),
     {noreply, State};
+
 handle_info({'EXIT', Pid, Reason},
-            State = #state{handler = Handler}) ->
+            State = #state{handler = Handler, worker = Pid}) ->
     lager:info("subscriber ~p handler {~p} crashed due to: ~p\n",
                [Handler, Pid, Reason]),
     case Reason of
@@ -132,10 +140,14 @@ handle_info({'EXIT', Pid, Reason},
             {noreply, State};
         _ ->
             State1 = start_worker(State),
-            lager:info("subscriber re-started handler: ~p {~p}\n",
-                       [Handler, State1#state.worker]),
+            lager:info("subscriber{~p} re-started worker module ~p{~p}",
+                       [self(), Handler, State1#state.worker]),
             {noreply, State1}
     end;
+
+handle_info({'EXIT', _Pid, Reason}, State) ->
+    terminate(Reason, State),
+    {stop, Reason, State};
 
 handle_info({'DOWN', _MRef, process, _Pid, _Info} = Down, State) ->
     lager:error("broker down: ~p", [Down]),
@@ -151,8 +163,9 @@ handle_info(Info, State) ->
     end.
 
 -spec terminate(any(), any()) -> ok.
-terminate(Reason, #state{conn = Conn}) ->
+terminate(Reason, #state{conn = Conn, worker = Worker}) ->
     lager:info("Terminating subscriber: ~p", [Reason]),
+    vent_handler_worker:terminate(Worker, Reason),
     catch amqp_connection:close(Conn),
     ok.
 
@@ -169,10 +182,11 @@ handle_message(#'basic.consume_ok'{consumer_tag = Tag},
                #state{consumer_tag = Tag} = State) ->
     {ok, State};
 handle_message({#'basic.deliver'{consumer_tag = Tag}, #amqp_msg{}} = Message,
-               #state{consumer_tag = Tag} = State) ->
+               #state{consumer_tag = Tag, worker = Worker} = State) ->
     T0 = get_monotonic_tstamp(nano_seconds),
     folsom_metrics:notify({?METRIC_IN, {inc, 1}}),
-    call_handler(#{msg => Message, processing_start => T0}, State),
+    TimedMessage = #{msg => Message, processing_start => T0},
+    vent_handler_worker:process(Worker, TimedMessage),
     {ok, State};
 handle_message(_, _State) ->
     false.
@@ -193,17 +207,6 @@ configure(HostOpts, #{error_exchange := ErrorExchange} = Opts) ->
     amqp_connection:close(Conn),
     ok.
 
-%% Destructive to data in Rabbit's queues!
-%% Use with caution. Intended for repeatable tests.
-%% -spec cleanup(opts()) -> ok.
-%% cleanup(#{error_exchange := ErrorExchange} = Opts) ->
-%%     {ok, Conn} = start_rabbitmq(Opts),
-%%     {ok, Ch} = amqp_connection:open_channel(Conn),
-%%     delete_work_queues(Ch, Opts),
-%%     delete_work_exchanges(Ch, Opts),
-%%     delete_exchange(Ch, ErrorExchange),
-%%     ok.
-
 -spec subscribe(state()) -> {ok, state()}.
 subscribe(#state{host_opts = HostOpts,
                  opts = #{id := {_, SeqId},
@@ -221,9 +224,11 @@ subscribe(#state{host_opts = HostOpts,
     lager:info("subscribed: ~s tag: ~s", [Queue, Tag]),
     {ok, State#state{conn = Conn, channel = Ch, consumer_tag = Tag}}.
 
--spec call_handler(timed_message(), state()) -> ok.
-call_handler(Message, #state{worker = Worker, channel = Ch} = State) ->
-    case vent_handler_worker:process_msg(Worker, Message) of
+-spec handler_result(timed_message(),
+                     vent_handler_worker:handler_response(),
+                     state()) -> ok.
+handler_result(Message, Response, #state{channel = Ch} = State) ->
+    case Response of
         ok ->
             ack(Ch, Message);
         {requeue, _Reason} ->
@@ -233,7 +238,7 @@ call_handler(Message, #state{worker = Worker, channel = Ch} = State) ->
         {drop, Reason} ->
             error(Ch, Message, Reason, State);
         {error, _} ->
-            ack(Ch, Message)
+            reject(Ch, false, Message)
     end.
 
 -spec ack(channel(), timed_message()) -> ok.
