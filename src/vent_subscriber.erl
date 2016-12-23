@@ -51,7 +51,8 @@
                 channel :: channel(),
                 consumer_tag :: binary(),
                 handler :: module(),
-                handler_state :: term(),
+                worker :: pid(),
+                pool :: atom(),
                 error_exchange :: binary(),
                 error_routing_key :: binary()}).
 
@@ -74,17 +75,23 @@ init({HostOpts, #{id := ID,
                   handler := HM,
                   error_exchange := EE,
                   error_routing_key := ERK} = Opts}) ->
+    process_flag(trap_exit, true),
     register_subscriber_metrics(),
+    State = start_worker(#state{handler = HM}),
     %% TODO: gen_server:cast should work
     self() ! {subscribe, ?INITIAL_BACKOFF, ?MAX_BACKOFF},
-    {ok, HandlerState} = vent_handler:init(HM),
-    {ok, #state{id = ID,
-                host_opts = HostOpts,
-                opts = Opts,
-                handler = HM,
-                handler_state = HandlerState,
-                error_exchange = EE,
-                error_routing_key = ERK}}.
+    {ok, State#state{id = ID,
+                     host_opts = HostOpts,
+                     opts = Opts,
+                     handler = HM,
+                     error_exchange = EE,
+                     error_routing_key = ERK}}.
+
+-spec start_worker(state()) -> state().
+start_worker(State = #state{ handler = HM }) ->
+    {ok, Pid} = vent_handler_worker:start_link(HM),
+    link(Pid),
+    State#state{ worker = Pid }.
 
 -spec handle_call(any(), any(), state()) -> {reply, ok, state()}.
 handle_call(_Request, _From, State) ->
@@ -116,6 +123,20 @@ handle_info({requeue, Message, Reason},
     lager:error("Handler asked to requeue message: ~p~n", [Reason]),
     reject(Ch, true, Message),
     {noreply, State};
+handle_info({'EXIT', Pid, Reason},
+            State = #state{handler = Handler}) ->
+    lager:info("subscriber ~p handler {~p} crashed due to: ~p\n",
+               [Handler, Pid, Reason]),
+    case Reason of
+        Reason when Reason =:= normal; Reason =:= shutdown ->
+            {noreply, State};
+        _ ->
+            State1 = start_worker(State),
+            lager:info("subscriber re-started handler: ~p {~p}\n",
+                       [Handler, State1#state.worker]),
+            {noreply, State1}
+    end;
+
 handle_info({'DOWN', _MRef, process, _Pid, _Info} = Down, State) ->
     lager:error("broker down: ~p", [Down]),
     {stop, {broker_down, Down}, State};
@@ -130,10 +151,8 @@ handle_info(Info, State) ->
     end.
 
 -spec terminate(any(), any()) -> ok.
-terminate(_Reason, #state{conn = Conn,
-                          handler = HMod,
-                          handler_state = HState}) ->
-    catch vent_handler:terminate(HMod, HState),
+terminate(Reason, #state{conn = Conn}) ->
+    lager:info("Terminating subscriber: ~p", [Reason]),
     catch amqp_connection:close(Conn),
     ok.
 
@@ -153,8 +172,8 @@ handle_message({#'basic.deliver'{consumer_tag = Tag}, #amqp_msg{}} = Message,
                #state{consumer_tag = Tag} = State) ->
     T0 = get_monotonic_tstamp(nano_seconds),
     folsom_metrics:notify({?METRIC_IN, {inc, 1}}),
-    State1 = call_handler(#{msg => Message, processing_start => T0}, State),
-    {ok, State1};
+    call_handler(#{msg => Message, processing_start => T0}, State),
+    {ok, State};
 handle_message(_, _State) ->
     false.
 
@@ -197,55 +216,24 @@ subscribe(#state{host_opts = HostOpts,
     {ok, Ch} = amqp_connection:open_channel(Conn),
     erlang:monitor(process, Ch),
     qos(Ch, PrefCount),
-    Queue = queue_name(Prefix, SeqId, NWorkers),
+    Queue = queue_name(Prefix, SeqId - 1, NWorkers),
     {ok, Tag} = subscribe(Ch, Queue),
     lager:info("subscribed: ~s tag: ~s", [Queue, Tag]),
     {ok, State#state{conn = Conn, channel = Ch, consumer_tag = Tag}}.
 
--spec call_handler(timed_message(), state()) -> state().
-call_handler(Message,
-             #state{channel = Ch,
-                    handler = Handler,
-                    handler_state = HState} = State) ->
-    Payload = decode_payload(Message, State),
-    try vent_handler:handle(Handler, Payload, HState) of
-        {ok, HState1} ->
-            ack(Ch, Message),
-            State#state{handler_state = HState1};
-        {requeue, Reason, HState1} ->
-            reject(Ch, true, Message),
-            lager:error("Handler asked to requeue message: ~p~n", [Reason]),
-            State#state{handler_state = HState1};
-        {requeue, Timeout, Reason, HState1} when Timeout > 0 ->
-            erlang:send_after(Timeout, self(), {requeue, Message, Reason}),
-            State#state{handler_state = HState1};
-        {drop, Reason, HState1} ->
-            State1 = State#state{handler_state = HState1},
-            error(Ch, Message, Reason, State),
-            State1
-    catch
-        ErrorType:Reason ->
-            Stack = erlang:get_stacktrace(),
-            lager:error("Error in message handler execution: ~p~n",
-                        [{ErrorType, Reason, Stack}]),
-            error(Ch, Message, {ErrorType, Reason, Stack}, State),
-            throw({ErrorType, Reason})
-    end.
-
--spec decode_payload(timed_message(), #state{}) ->
-                            number() | binary() | maps:map() | [maps:map()].
-decode_payload(#{msg := {#'basic.deliver'{},
-                         #amqp_msg{payload = Payload}}} = Message,
-               #state{channel = Ch} = State) ->
-    %% TODO: for now we just assume it is always a valid json.
-    try jsone:decode(Payload)
-    catch
-        ErrorType:Reason ->
-            Stack = erlang:get_stacktrace(),
-            lager:error("Error in json decoding: ~p~n",
-                        [{ErrorType, Reason, Stack}]),
-            error(Ch, Message, {ErrorType, Reason, Stack}, State),
-            throw({ErrorType, Reason})
+-spec call_handler(timed_message(), state()) -> ok.
+call_handler(Message, #state{worker = Worker, channel = Ch} = State) ->
+    case vent_handler_worker:process_msg(Worker, Message) of
+        ok ->
+            ack(Ch, Message);
+        {requeue, _Reason} ->
+            reject(Ch, true, Message);
+        {requeue, Timeout, Reason} when Timeout > 0 ->
+            erlang:send_after(Timeout, self(), {requeue, Message, Reason});
+        {drop, Reason} ->
+            error(Ch, Message, Reason, State);
+        {error, _} ->
+            ack(Ch, Message)
     end.
 
 -spec ack(channel(), timed_message()) -> ok.
@@ -304,15 +292,6 @@ declare_work_exchanges(Ch, #{n_workers := N,
     %% TODO: # is a wildcard; should we be more specific?
     bind_exchange(Ch, Exchange, HashingExchange, RKey).
 
-%% delete_work_exchanges(Ch, #{n_workers := 1} = Opts) ->
-%%     #{exchange := Exchange} = Opts,
-%%     delete_exchange(Ch, Exchange);
-%% delete_work_exchanges(Ch, #{n_workers := N} = Opts) when N > 1 ->
-%%     #{exchange := DirectExchange} = Opts,
-%%     delete_exchange(Ch, DirectExchange),
-%%     HashingExchange = hashing_exchange_name(DirectExchange),
-%%     delete_exchange(Ch, HashingExchange).
-
 declare_exchange(Ch, Exchange, Type) ->
     Ex = #'exchange.declare'{exchange = Exchange,
                              type = Type,
@@ -336,20 +315,11 @@ declare_work_queues(Ch, #{n_workers := N} = Opts) ->
     [ declare_queue(Ch, queue_name(Queue, I, N), queue_arguments(Opts))
       || I <- lists:seq(0, N-1) ].
 
-%% delete_work_queues(Ch, #{n_workers := N} = Opts) ->
-%%     #{queue := Queue} = Opts,
-%%     [ delete_queue(Ch, queue_name(Queue, I, N))
-%%       || I <- lists:seq(0, N-1) ].
-
 declare_queue(Ch, Queue, Arguments) ->
     Q = #'queue.declare'{queue = Queue,
                          durable = true,
                          arguments = Arguments},
     #'queue.declare_ok'{} = amqp_channel:call(Ch, Q).
-
-%% delete_queue(Ch, Queue) ->
-%%     D = #'queue.delete'{queue = Queue},
-%%     #'queue.delete_ok'{} = amqp_channel:call(Ch, D).
 
 queue_name(Prefix, _SeqNo, 1) ->
     Prefix;
@@ -385,10 +355,6 @@ routing_key(#{n_workers := 1, routing_key := RKey}) ->
     RKey;
 routing_key(_) ->
     ?QUEUE_WEIGHT.
-
-%% delete_exchange(Ch, Exchange) ->
-%%     D = #'exchange.delete'{exchange = Exchange},
-%%     #'exchange.delete_ok'{} = amqp_channel:call(Ch, D).
 
 qos(Ch, PrefetchCount) ->
     Q = #'basic.qos'{prefetch_count = PrefetchCount},

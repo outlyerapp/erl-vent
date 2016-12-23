@@ -18,4 +18,5 @@ terminate(_S) ->
 -spec handle(term(), undefined) -> {ok, undefined}.
 handle(Msg, _S) ->
     lager:info("Received message: ~p", [Msg]),
+    [] = Msg,
     {ok, undefined}.
