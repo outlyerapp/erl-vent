@@ -9,7 +9,8 @@
 -type handler_response() :: ok |
                             {requeue, term()} |
                             {requeue, number(), term()} |
-                            {drop, term()}.
+                            {drop, term()} |
+                            {error, Reason :: term()}.
 -type message() :: #amqp_msg{}.
 -type timed_message() :: #{msg => message(),
                            processing_start => monotonic_tstamp()}.
@@ -26,11 +27,12 @@ simple_processor(Handler) ->
     {ok, HState} = init(Handler),
     loop(#state{handler = Handler, handler_state = HState}).
 
--spec process(pid(), Msg :: timed_message()) -> ok.
+-spec process(pid(), Msg :: timed_message()) -> {pid(), {'process',
+                                                         handler_response()}}.
 process(Pid, Msg) ->
     Pid ! {self(), {process, Msg}}.
 
--spec terminate(pid(), Reason :: term()) -> ok.
+-spec terminate(pid(), Reason :: term()) -> {'terminate', _}.
 terminate(Pid, Reason) ->
     Pid ! {terminate, Reason}.
 
@@ -57,7 +59,7 @@ loop(State) ->
 %% Internal functions
 %%
 
--spec init(Handler :: module()) -> state().
+-spec init(Handler :: module()) -> {ok, state()}.
 init(Handler) when is_atom(Handler) ->
     vent_handler:init(Handler).
 
@@ -107,4 +109,4 @@ decode_payload(#{msg := {#'basic.deliver'{},
 -spec terminate_handler(state(), Reason :: term()) -> ok.
 terminate_handler(#state{handler = Handler, handler_state = HState}, Reason) ->
     lager:info("Handler worker terminating due to reason: ~p", [Reason]),
-    vent_handler:handle(Handler, HState).
+    vent_handler:terminate(Handler, HState).
