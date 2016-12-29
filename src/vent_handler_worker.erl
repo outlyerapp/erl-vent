@@ -72,7 +72,6 @@ handle(Message, #state{handler = Handler, handler_state = HState} = State) ->
             State1 = State#state{handler_state = HState1},
             {{requeue, Reason}, State1};
         {requeue, Timeout, Reason, HState1} when Timeout > 0 ->
-            erlang:send_after(Timeout, self(), {requeue, Message, Reason}),
             State1 = State#state{handler_state = HState1},
             {{requeue, Timeout, Reason}, State1};
         {drop, Reason, HState1} ->
