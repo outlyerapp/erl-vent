@@ -61,7 +61,7 @@ handle(Mod, Msg, State) ->
     end.
 
 %%--------------------------------------------------------------------
-%% @doc Stops a pusher.
+%% @doc Stops a subscription handler.
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate(module(), state()) -> ok.

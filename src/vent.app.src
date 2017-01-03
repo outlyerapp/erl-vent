@@ -4,7 +4,7 @@
               {registered,[]},
               {mod,{vent_app,[]}},
               {applications,[kernel,stdlib,lager,folsom,jsone,backoff,
-                             amqp_client]},
+                             amqp_client,poolboy]},
               {env,[]},
               {modules,[]},
               {maintainers,["Dataloop.io"]},

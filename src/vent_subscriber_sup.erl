@@ -10,7 +10,7 @@
 -include("vent_internal.hrl").
 
 %% API
--export([start_link/0]).
+-export([start_link/4]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -21,20 +21,23 @@
 %% API functions
 %%====================================================================
 
--spec start_link() -> {ok, pid()}.
-start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+-spec start_link(SupName :: atom(),
+                 PoolName :: atom(),
+                 host_opts(),
+                 vent_subscriber:opts()) -> {ok, pid()}.
+start_link(SupName, PoolName, HostOpts, Opts) ->
+    supervisor:start_link({local, SupName}, ?MODULE,
+                          {PoolName, HostOpts, Opts}).
 
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================
-
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
--spec init([]) -> {ok, {supervisor:sup_flags(),
-                                 [supervisor:child_spec()]}}.
-init([]) ->
-    HostOpts = vent_helper:get_host_opts(),
-    {ok, {sup_flags(), subscriber_spec(HostOpts)}}.
+-spec init({PoolName :: atom(), host_opts(), vent_subscriber:opts()}) ->
+    {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
+init({PoolName, HostOpts, Opts}) ->
+    Specs = subscriber_specs(PoolName, HostOpts, Opts),
+    {ok, {sup_flags(), Specs}}.
 
 %%====================================================================
 %% Internal functions
@@ -44,29 +47,14 @@ init([]) ->
 sup_flags() ->
     #{strategy => one_for_one}.
 
--spec subscriber_spec(host_opts()) -> [supervisor:child_spec()].
-subscriber_spec(HostOpts) ->
-    Subscribers = vent_helper:required_opt(subscribers),
-    Workers = [begin
-                   Opts = opts(Subscriber),
-                   subscribers(HostOpts, Opts)
-               end || Subscriber <- Subscribers],
-    lists:flatten(Workers).
-
--spec subscribers(host_opts(),
-                  vent_subscriber:opts()) -> [supervisor:child_spec()].
-subscribers(HostOpts, Opts = #{handler   := Handler,
-                               n_workers := NWorkers}) ->
+-spec subscriber_specs(PoolName :: atom(),
+                       host_opts(),
+                       vent_subscriber:opts()) -> [supervisor:child_spec()].
+subscriber_specs(PoolName, HostOpts, Opts = #{name      := Name,
+                                              n_workers := NWorkers}) ->
     [begin
-         ID = {Handler, SeqId},
+         ID = {Name, SeqId},
+         Opts1 = Opts#{id => ID, pool => PoolName},
          #{id => ID,
-           start => {vent_subscriber, start_link, [HostOpts, Opts#{id => ID}]}}
+           start => {vent_subscriber, start_link, [HostOpts, Opts1]}}
      end || SeqId <- lists:seq(1, NWorkers)].
-
--spec opts(term()) -> vent_subcriber:opts().
-opts({vent_subscriber, Conf}) ->
-    Defaults = #{handler => vent_debug_handler,
-                 n_workers => 1,
-                 prefetch_count => 2},
-    Props = maps:from_list(Conf),
-    maps:merge(Defaults, Props).

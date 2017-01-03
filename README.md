@@ -57,7 +57,9 @@ that it consumes.
 
 Every subscription should be configured together with its handler:
 
-    {n_workers, 1},                                     # defaults to 5
+    {name, "subscription_name"},                        # required, unique
+    {n_workers, 1},                                     # defaults to 1
+    {n_overflow, 1},                                    # defaults to 1
     {prefetch_count, 2},                                # defaults to 2
     {exchange, <<"exchange">>},                         # required
     {dead_letter_exchange, <<"dl_exchange">>},          # required
@@ -72,6 +74,13 @@ Note that more than one subscriber may be registered.
      {subscribers,
          [{vent_subscriber, ...config for 1st subscriber},
           {vent_subscriber, ...config for 2nd subscriber}]}
+
+Each subscription is supervised by a pool supervisor.  This pool supervisor
+starts a Poolboy pool of workers, and a subscriber supervisor.
+The subscribers delegate the handling of a message to a handler worker, that
+they obtain from a worker pool.
+This separation between subscriber and worker protects the subscription against
+failures in handler modules, to prevent expensive restarts.
 
 ## Build
 

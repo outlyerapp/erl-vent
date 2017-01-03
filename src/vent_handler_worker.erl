@@ -1,7 +1,16 @@
 -module(vent_handler_worker).
+-behaviour(gen_server).
 
 %% API
--export([simple_processor/1, process/2, terminate/2]).
+-export([start_link/1, process/2]).
+
+%% gen_server callbacks
+-export([init/1,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+         code_change/3]).
 
 -include("vent_internal.hrl").
 -include_lib("amqp_client/include/amqp_client.hrl").
@@ -10,92 +19,97 @@
                             {requeue, term()} |
                             {requeue, number(), term()} |
                             {drop, term()} |
-                            {error, Reason :: term()}.
+                            {error, term()}.
+
 -type message() :: #amqp_msg{}.
 -type timed_message() :: #{msg => message(),
                            processing_start => monotonic_tstamp()}.
 
--export_type([handler_response/0]).
-
--record(state, { handler_state :: term(),
-                 handler :: module() }).
+-record(state, {handler :: module(),
+                handler_state :: term()}).
 
 -type state() :: #state{}.
 
--spec simple_processor(Handler :: module()) -> ok.
-simple_processor(Handler) ->
-    {ok, HState} = init(Handler),
-    loop(#state{handler = Handler, handler_state = HState}).
+%%%===================================================================
+%%% API
+%%%===================================================================
 
--spec process(pid(), Msg :: timed_message()) -> {pid(), {'process',
-                                                         handler_response()}}.
+-spec start_link(term()) -> gen_server_startlink_ret().
+start_link(Args) ->
+    gen_server:start_link(?MODULE, Args, []).
+
+-spec process(pid(), Msg :: timed_message()) -> handler_response().
 process(Pid, Msg) ->
-    Pid ! {self(), {process, Msg}}.
+    gen_server:call(Pid, {process, Msg}).
 
--spec terminate(pid(), Reason :: term()) -> {'terminate', _}.
-terminate(Pid, Reason) ->
-    Pid ! {terminate, Reason}.
+%%%===================================================================
+%%% gen_server callbacks
+%%%===================================================================
 
-%% TODO configure a timeout so processing is not indefinite
-loop(State) ->
-    receive
-        {From, {process, Message}} ->
-            {Response, State1} = handle(Message, State),
-            From ! {process, Message, Response},
+-spec init([module()]) -> {ok, state()}.
+init([Handler]) ->
+    {ok, HandlerState} = vent_handler:init(Handler),
+    {ok, #state{ handler = Handler,
+                 handler_state = HandlerState }}.
 
-            case Response of
-                {error, Reason} ->
-                    exit(self(), Reason);
-                _ ->
-                    loop(State1)
-            end;
-        {terminate, Reason} ->
-            terminate_handler(State, Reason);
-        {'EXIT', _Parent, Reason} ->
-            terminate_handler(State, Reason)
-    end.
+-spec handle_call(any(), any(), state()) -> {reply, ok, state()}.
+handle_call({process, Msg}, _From, State) ->
+    {Reply, State} = call_handler(Msg, State),
+    {reply, Reply, State};
+handle_call(_Request, _From, State) ->
+    Reply = ok,
+    {reply, Reply, State}.
 
-%%
-%% Internal functions
-%%
+-spec handle_cast(any(), state()) -> {noreply, state()}.
+handle_cast(_Msg, State) ->
+    {noreply, State}.
 
--spec init(Handler :: module()) -> {ok, state()}.
-init(Handler) when is_atom(Handler) ->
-    vent_handler:init(Handler).
+-spec handle_info(any(), state()) -> {noreply, state()} |
+                                     {stop, any(), state()}.
+handle_info(_Info, State) ->
+    {noreply, State}.
 
--spec handle(timed_message(), state()) -> {handler_response(), state()}.
-handle(Message, #state{handler = Handler, handler_state = HState} = State) ->
-    try handle(Handler, Message, HState) of
+-spec terminate(any(), any()) -> ok.
+terminate(_Reason, #state{ handler = Handler,
+                           handler_state = HState}) ->
+    catch vent_handler:terminate(Handler, HState),
+    ok.
+
+-spec code_change(any(), state(), any()) -> {ok, state()}.
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+-spec call_handler(timed_message(), state()) -> {handler_response(), state()}.
+call_handler(Message,
+             #state{handler = Handler,
+                    handler_state = HState} = State) ->
+    Payload = decode_payload(Message),
+    try vent_handler:handle(Handler, Payload, HState) of
         {ok, HState1} ->
-            State1 = State#state{handler_state = HState1},
-            {ok, State1};
+            {ok, State#state{handler_state = HState1}};
         {requeue, Reason, HState1} ->
             lager:error("Handler asked to requeue message: ~p~n", [Reason]),
-            State1 = State#state{handler_state = HState1},
-            {{requeue, Reason}, State1};
+            {{requeue, Reason}, State#state{handler_state = HState1}};
         {requeue, Timeout, Reason, HState1} when Timeout > 0 ->
-            State1 = State#state{handler_state = HState1},
-            {{requeue, Timeout, Reason}, State1};
+            {{requeue, Timeout, Reason}, State#state{handler_state = HState1}};
         {drop, Reason, HState1} ->
-            State1 = State#state{handler_state = HState1},
-            {{drop, Reason}, State1}
+            {{drop, Reason}, State#state{handler_state = HState1}}
     catch
         ErrorType:Reason ->
             Stack = erlang:get_stacktrace(),
             lager:error("Error in message handler execution: ~p~n",
                         [{ErrorType, Reason, Stack}]),
-            {{error, Reason}, HState}
+            {{error, Reason}, State}
     end.
 
--spec handle(module(), timed_message(), term()) -> term().
-handle(Handler, Message, HState) ->
-    Payload = decode_payload(Message),
-    vent_handler:handle(Handler, Payload, HState).
-
--spec decode_payload(timed_message()) -> number() | binary() | maps:map() |
-                                         [maps:map()].
+-spec decode_payload(timed_message()) ->
+    number() | binary() | maps:map() | [maps:map()].
 decode_payload(#{msg := {#'basic.deliver'{},
-                         #amqp_msg{payload = Payload}}}) ->
+                         #amqp_msg{payload = Payload}}} = _Message) ->
     %% TODO: for now we just assume it is always a valid json.
     try jsone:decode(Payload)
     catch
@@ -105,8 +119,3 @@ decode_payload(#{msg := {#'basic.deliver'{},
                         [{ErrorType, Reason, Stack}]),
             throw({ErrorType, Reason})
     end.
-
--spec terminate_handler(state(), Reason :: term()) -> ok.
-terminate_handler(#state{handler = Handler, handler_state = HState}, Reason) ->
-    lager:info("Handler worker terminating due to reason: ~p", [Reason]),
-    vent_handler:terminate(Handler, HState).
