@@ -9,6 +9,7 @@
 -callback handle(term(), state()) ->
     {ok, state()} |
     {requeue, term(), state()} |
+    {requeue, pos_integer(), term(), state()} |
     {drop, term(), state()}.
 -callback terminate(state()) ->
     ok.

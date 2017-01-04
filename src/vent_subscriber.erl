@@ -189,7 +189,13 @@ call_handler(Message,
              #state{opts = Opts, channel = Ch} = State) ->
     #{pool := Pool} = Opts,
     WorkerFun = fun(Worker) ->
-                        vent_handler_worker:process(Worker, Message)
+                        try
+                            vent_handler_worker:process(Worker, Message)
+                        catch
+                            ErrorType:Reason ->
+                                Stack = erlang:get_stacktrace(),
+                                {error, ErrorType, Reason, Stack}
+                        end
                 end,
     try poolboy:transaction(Pool, WorkerFun) of
         ok ->
@@ -205,7 +211,9 @@ call_handler(Message,
         {drop, Reason} ->
             error(Ch, Message, Reason, State),
             State;
-        {error, Reason} ->
+        {error, ErrorType, Reason, Stack} ->
+            lager:error("Error in message handler execution: ~p~n",
+                        [{ErrorType, Reason, Stack}]),
             error(Ch, Message, Reason, State),
             State
     catch

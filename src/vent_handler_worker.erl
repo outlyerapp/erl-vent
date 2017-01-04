@@ -18,8 +18,7 @@
 -type handler_response() :: ok |
                             {requeue, term()} |
                             {requeue, number(), term()} |
-                            {drop, term()} |
-                            {error, term()}.
+                            {drop, term()}.
 
 -type message() :: #amqp_msg{}.
 -type timed_message() :: #{msg => message(),
@@ -84,11 +83,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 -spec call_handler(timed_message(), state()) -> {handler_response(), state()}.
-call_handler(Message,
+call_handler(#{msg := {#'basic.deliver'{},
+                       #amqp_msg{payload = Payload}}},
              #state{handler = Handler,
                     handler_state = HState} = State) ->
-    Payload = decode_payload(Message),
-    try vent_handler:handle(Handler, Payload, HState) of
+    DecodedPayload = jsone:decode(Payload),
+    case vent_handler:handle(Handler, DecodedPayload, HState) of
         {ok, HState1} ->
             {ok, State#state{handler_state = HState1}};
         {requeue, Reason, HState1} ->
@@ -98,24 +98,4 @@ call_handler(Message,
             {{requeue, Timeout, Reason}, State#state{handler_state = HState1}};
         {drop, Reason, HState1} ->
             {{drop, Reason}, State#state{handler_state = HState1}}
-    catch
-        ErrorType:Reason ->
-            Stack = erlang:get_stacktrace(),
-            lager:error("Error in message handler execution: ~p~n",
-                        [{ErrorType, Reason, Stack}]),
-            {{error, Reason}, State}
-    end.
-
--spec decode_payload(timed_message()) ->
-    number() | binary() | maps:map() | [maps:map()].
-decode_payload(#{msg := {#'basic.deliver'{},
-                         #amqp_msg{payload = Payload}}} = _Message) ->
-    %% TODO: for now we just assume it is always a valid json.
-    try jsone:decode(Payload)
-    catch
-        ErrorType:Reason ->
-            Stack = erlang:get_stacktrace(),
-            lager:error("Error in json decoding: ~p~n",
-                        [{ErrorType, Reason, Stack}]),
-            throw({ErrorType, Reason})
     end.
