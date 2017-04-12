@@ -148,6 +148,9 @@ handle_message({#'basic.deliver'{consumer_tag = Tag}, #amqp_msg{}} = Message,
     folsom_metrics:notify({?METRIC_IN, {inc, 1}}),
     State1 = call_handler(#{msg => Message, processing_start => T0}, State),
     {ok, State1};
+handle_message(#'basic.cancel'{}, State) ->
+    exit(canceled),
+    {ok, State};
 handle_message(_, _State) ->
     false.
 
