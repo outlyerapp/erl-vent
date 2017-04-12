@@ -104,7 +104,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec do_publish(exchange(), topic(), [sample()], [exchange_opt()], #state{}) -> ok.
+-spec do_publish(exchange(), topic(),
+                 [sample()], [exchange_opt()], #state{}) -> ok.
 do_publish(Exchange, Topic, Messages, ExchangeOpts,
         State = #state{opts = #{chunk_size := S}})
   when length(Messages) > S ->
@@ -116,7 +117,8 @@ do_publish(_Exchange, _Topic, [], _ExchangeOpts, _State) ->
 do_publish(Exchange, Topic, Messages, ExchangeOpts, State) ->
     publish_chunk(Exchange, Topic, Messages, ExchangeOpts, State).
 
--spec publish_chunk(exchange(), topic(), [sample()], [exchange_opt()], #state{}) -> ok.
+-spec publish_chunk(exchange(), topic(),
+                    [sample()], [exchange_opt()], #state{}) -> ok.
 publish_chunk(Exchange, Topic, Messages, ExchangeOpts, #state{channel = Ch}) ->
     %% TODO: remove assumption on JSON serialization
     Json = jsone:encode(Messages),
