@@ -31,7 +31,11 @@ The serialization format is assumed to be JSON.
 
 To publish a message:
 
-    vent_publisher:publish(Exchange, Topic, Payload).
+    vent_publisher:publish(Exchange, Topic, Payload, Opts).
+
+Opts is a proplist that currently consists of the following options:
+
+    {durable, boolean()}                                # exchange is durable or transient
 
 Publisher configuration:
 
