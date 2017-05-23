@@ -53,8 +53,8 @@ init([Handler]) ->
 
 -spec handle_call(any(), any(), state()) -> {reply, ok, state()}.
 handle_call({process, Msg}, _From, State) ->
-    {Reply, State} = call_handler(Msg, State),
-    {reply, Reply, State};
+    {Reply, State1} = call_handler(Msg, State),
+    {reply, Reply, State1};
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
