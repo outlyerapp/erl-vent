@@ -67,9 +67,12 @@ subscriber_pool_sup_name(#{name := Name}) when is_list(Name) ->
 
 -spec opts(term()) -> vent_subcriber:opts().
 opts({vent_subscriber, Conf}) ->
+    Props = maps:from_list(Conf),
+    #{name := Name, exchange := Ex, routing_key := RKey} = Props,
+    BName = list_to_binary(Name),
     Defaults = #{handler => vent_debug_handler,
+                 queue => <<Ex/binary, $:, RKey/binary, $:, BName/binary>>,
                  n_workers => 1,
                  n_overflow => 1,
                  prefetch_count => 2},
-    Props = maps:from_list(Conf),
     maps:merge(Defaults, Props).
