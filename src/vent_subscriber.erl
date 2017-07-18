@@ -318,12 +318,15 @@ queue_name(Prefix, _SeqNo, 1) ->
 queue_name(Prefix, SeqNo, _NWorkers) ->
     <<Prefix/bytes, "-p", (integer_to_binary(SeqNo))/bytes>>.
 
-queue_arguments(#{dead_letter_exchange := DLExchange,
-                  message_ttl := Ttl}) ->
-    [{<<"x-message-ttl">>, long, Ttl},
-     {<<"x-dead-letter-exchange">>, longstr, DLExchange}];
-queue_arguments(#{dead_letter_exchange := DLExchange}) ->
-    [{<<"x-dead-letter-exchange">>, longstr, DLExchange}].
+queue_arguments(Opts) ->
+    maps:fold(fun map_queue_option/3, [], Opts).
+
+map_queue_option(message_ttl, Ttl, Acc) ->
+    [{<<"x-message-ttl">>, long, Ttl} | Acc];
+map_queue_option(dead_letter_exchange, DLExchange, Acc) ->
+    [{<<"x-dead-letter-exchange">>, longstr, DLExchange} | Acc];
+map_queue_option(_Key, _Value, Acc) ->
+    Acc.
 
 bind_queues(Ch, #{n_workers := N} = Opts) ->
     #{exchange := Prefix,
